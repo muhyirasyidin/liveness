@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Liveness Detection with Face Capture</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+  <style>
+    #status {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: green;
+      font-size: 20px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <video id="video" autoplay muted></video>
+  <canvas id="canvas"></canvas>
+  <div id="status">Status: Waiting for face...</div>
+  <img id="captured-face" alt="Captured Face">
+
+  <script>
+    const videoElement = document.getElementById('video');
+    const canvasElement = document.getElementById('canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const statusElement = document.getElementById('status');
+    const capturedFaceElement = document.getElementById('captured-face');
+
+		let apiTimer = null;
+
+    async function captureFace(image, boundingBox) {
+      // Create a temporary canvas to extract the face region
+      const tempCanvas = document.createElement('canvas');
+      const tempCtx = tempCanvas.getContext('2d');
+
+      // Calculate the face region dimensions
+      const faceX = boundingBox.xCenter * canvasElement.width - boundingBox.width * canvasElement.width / 2;
+      const faceY = boundingBox.yCenter * canvasElement.height - boundingBox.height * canvasElement.height / 2;
+      const faceWidth = boundingBox.width * canvasElement.width;
+      const faceHeight = boundingBox.height * canvasElement.height;
+
+      // Set canvas dimensions to the face size
+      tempCanvas.width = 500;
+      tempCanvas.height = 500;
+
+      // Draw the face region onto the temporary canvas
+      tempCtx.drawImage(
+        image,
+        faceX, faceY, 400, 400,
+        0, 0, 400, 400
+      );
+
+      // Convert the extracted face to a data URL
+      const faceDataUrl = tempCanvas.toDataURL('image/png');
+
+      // Display the captured face
+      capturedFaceElement.src = faceDataUrl;
+      capturedFaceElement.style.display = 'block';
+    }
+
+    function onResults(results) {
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+      if (results.detections.length > 0) {
+        statusElement.textContent = 'Status: Face Detected';
+
+        // Draw bounding boxes and capture the first face detected
+        for (const detection of results.detections) {
+          const boundingBox = detection.boundingBox;
+          canvasCtx.beginPath();
+          canvasCtx.rect(
+            boundingBox.xCenter * canvasElement.width - boundingBox.width * canvasElement.width / 2,
+            boundingBox.yCenter * canvasElement.height - boundingBox.height * canvasElement.height / 2,
+            boundingBox.width * canvasElement.width,
+            boundingBox.height * canvasElement.height
+          );
+          canvasCtx.lineWidth = 2;
+          canvasCtx.strokeStyle = 'blue';
+          canvasCtx.stroke();
+        }
+
+				if (!apiTimer) {
+          apiTimer = setTimeout(() => {
+            captureFace(results.image, results.detections[0].boundingBox);
+            apiTimer = null;
+          }, 5000);
+        }
+      } else {
+        statusElement.textContent = 'Status: No Face Detected';
+        capturedFaceElement.style.display = 'none';
+
+				clearTimeout(apiTimer);
+        apiTimer = null;
+      }
+
+      canvasCtx.restore();
+    }
+
+    const faceDetection = new FaceDetection({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`,
+    });
+    faceDetection.setOptions({
+      model: 'short', // 'short' or 'full'
+      minDetectionConfidence: 0.5,
+    });
+    faceDetection.onResults(onResults);
+
+    const camera = new Camera(videoElement, {
+      onFrame: async () => {
+        await faceDetection.send({ image: videoElement });
+      },
+      width: 640,
+      height: 480,
+    });
+    camera.start();
+
+    videoElement.onloadedmetadata = () => {
+      canvasElement.width = videoElement.videoWidth;
+      canvasElement.height = videoElement.videoHeight;
+    };
+  </script>
+</body>
+</html>
